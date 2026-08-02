@@ -1,46 +1,36 @@
-# Copy to config.yaml. Values in ${...} are read from environment variables -
-# never hardcode secrets or OCIDs directly in this file if you plan to commit it.
-
 oci:
-  compartment_id: ${OCI_COMPARTMENT_ID}
-  config_file: ~/.oci/config     # standard `oci setup config` location
-  config_profile: DEFAULT
+  config_file: ~/.oci/config
+  profile: DEFAULT
+  compartment_id: ocid1.compartment.oc1..replace_me
+  subnet_id: ocid1.subnet.oc1..replace_me
+  ssh_public_key_path: ~/.ssh/id_rsa.pub
 
-# Regions to search, in order. Ampere A1 free-tier capacity is scarcer in
-# popular regions - listing several nearby regions increases your odds.
-regions:
-  - eu-frankfurt-1
-  - eu-amsterdam-1
-  - eu-milan-1
+search:
+  regions:
+    - eu-frankfurt-1
+    - eu-amsterdam-1
+    - eu-milan-1
+  shapes:
+    - shape: VM.Standard.A1.Flex
+      ocpus: 2
+      memory_gbs: 12
+    - shape: VM.Standard.E2.1.Micro
+      ocpus: 1
+      memory_gbs: 1
+  image_operating_system: Oracle Linux
+  image_operating_system_version: "9"
+  max_attempts_per_target: 1
+  sleep_seconds_between_regions: 2
 
-# Free tier allows up to 4 OCPU / 24 GB total across Ampere A1 instances.
-# Splitting into smaller shapes (e.g. 2 OCPU / 12 GB) sometimes succeeds
-# faster than requesting the full 4/24 in one shot - list several to try.
-shapes:
-  - name: VM.Standard.A1.Flex
-    ocpus: 4
-    memory_in_gbs: 24
-  - name: VM.Standard.A1.Flex
-    ocpus: 2
-    memory_in_gbs: 12
-
-instance:
-  display_name: winwin-backend-vm
-  image_id: ${OCI_IMAGE_ID}          # ocid of an Ubuntu 22.04 aarch64 image
-  subnet_id: ${OCI_SUBNET_ID}        # from your Terraform network.tf output
-  ssh_public_key_path: ~/.ssh/id_ed25519.pub
+launch:
+  enabled: false
   assign_public_ip: true
-  # user_data_path: ./cloud-init.yaml   # optional, base64-encoded and attached as metadata
+  display_name_prefix: capacity-hunter
 
-polling:
-  min_interval_seconds: 30
-  max_interval_seconds: 300
-
-# "notify": just alert when capacity is found, don't launch anything.
-# "create": launch the instance automatically the moment capacity is found.
-mode: create
-
-notifications:
-  telegram:
-    bot_token: ${TELEGRAM_BOT_TOKEN}
-    chat_id: ${TELEGRAM_CHAT_ID}
+post_launch:
+  env_file_path: .env
+  ssh_user: ubuntu
+  ssh_private_key_path: ~/.ssh/id_ed25519
+  telegram_enabled: false
+  telegram_bot_token: ""
+  telegram_chat_id: ""
