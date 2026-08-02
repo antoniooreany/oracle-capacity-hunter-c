@@ -96,7 +96,7 @@ class CapacityHunter:
         try:
             launch_response = compute_client.launch_instance(details)
         except oci.exceptions.ServiceError as exc:
-            if exc.code in OUT_OF_CAPACITY_CODES or exc.status == 500:
+            if exc.code in OUT_OF_CAPACITY_CODES or exc.status in {500, 429}:
                 logger.info("No capacity in %s / %s: %s", region, ad, exc.code)
                 return LaunchResult(found=False)
             raise  # unexpected error - surface it
@@ -193,6 +193,8 @@ class CapacityHunter:
             )
         logger.info(msg)
         self._notifier.send(msg)
+
+
 
 
 
