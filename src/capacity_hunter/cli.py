@@ -40,12 +40,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.once:
         if result.found:
-            hunter._announce(result)  # noqa: SLF001 - fine for CLI reporting
+            hunter._announce(result)
         else:
             logging.getLogger(__name__).info("No capacity found this pass.")
+        return 0
 
-    return 0 if result.found or not args.once else 1
+    return 0 if result.found else 1
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

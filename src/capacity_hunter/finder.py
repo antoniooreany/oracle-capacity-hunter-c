@@ -6,8 +6,9 @@ import logging
 import random
 import time
 from dataclasses import dataclass
+from typing import Any, cast
 
-import oci
+import oci  # TODO: not resolved
 
 from capacity_hunter.config import HunterConfig, ShapeConfig
 from capacity_hunter.notifier import TelegramNotifier
@@ -55,10 +56,10 @@ class CapacityHunter:
             lifecycle_state="RUNNING",
         )
         if response.data:
-            return response.data[0].id
+            return cast(str, response.data[0].id)
         return None
 
-    def _metadata(self) -> dict:
+    def _metadata(self) -> dict[str, Any]:
         with open(self._config.instance.ssh_public_key_path, encoding="utf-8") as fh:
             ssh_key = fh.read().strip()
         meta = {"ssh_authorized_keys": ssh_key}
@@ -95,7 +96,7 @@ class CapacityHunter:
         try:
             launch_response = compute_client.launch_instance(details)
         except oci.exceptions.ServiceError as exc:
-            if exc.code in OUT_OF_CAPACITY_CODES or exc.status == 500:
+            if exc.code in OUT_OF_CAPACITY_CODES or exc.status in {500, 429}:
                 logger.info("No capacity in %s / %s: %s", region, ad, exc.code)
                 return LaunchResult(found=False)
             raise  # unexpected error - surface it
@@ -192,3 +193,8 @@ class CapacityHunter:
             )
         logger.info(msg)
         self._notifier.send(msg)
+
+
+
+
+
