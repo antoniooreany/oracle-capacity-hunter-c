@@ -7,7 +7,7 @@ import random
 import time
 from dataclasses import dataclass
 
-import oci # TODO: not resolved
+import oci  # TODO: not resolved
 
 from capacity_hunter.config import HunterConfig, ShapeConfig
 from capacity_hunter.notifier import TelegramNotifier
