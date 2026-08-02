@@ -95,7 +95,7 @@ def load_config(path: str | Path) -> HunterConfig:
         oci_config_file=os.path.expanduser(oci_section.get("config_file", "~/.oci/config")),
         oci_config_profile=oci_section.get("config_profile", "DEFAULT"),
         regions=raw["regions"],
-        shapes=[ShapeConfig(**s) for s in raw["shapes"]],
+        shapes=[ShapeConfig(**{k: v for k, v in s.items() if k != "priority"}) for s in raw["shapes"]],
         instance=InstanceConfig(
             display_name=instance_section["display_name"],
             image_id=instance_section["image_id"],
@@ -112,4 +112,5 @@ def load_config(path: str | Path) -> HunterConfig:
             chat_id=telegram_section.get("chat_id"),
         ),
     )
+
 
