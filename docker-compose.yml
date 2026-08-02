@@ -1,0 +1,16 @@
+services:
+  capacity-hunter:
+    build: .
+    restart: unless-stopped
+    environment:
+      OCI_COMPARTMENT_ID: ${OCI_COMPARTMENT_ID}
+      OCI_IMAGE_ID: ${OCI_IMAGE_ID}
+      OCI_SUBNET_ID: ${OCI_SUBNET_ID}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ~/.oci:/root/.oci:ro
+      - ~/.ssh/id_ed25519.pub:/root/.ssh/id_ed25519.pub:ro
+    # Default CMD in the Dockerfile loops forever with backoff.
+    # For a single pass instead: `command: ["--config", "/app/config.yaml", "--once"]`
