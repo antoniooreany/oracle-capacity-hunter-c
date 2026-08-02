@@ -155,3 +155,5 @@ ruff check src tests      # lint
 ## License
 
 MIT — see `LICENSE`.
+
+<!-- example feature branch marker -->
