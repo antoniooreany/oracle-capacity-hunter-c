@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import oci
+import oci # TODO: not resolved
 import pytest
 
 from capacity_hunter.config import load_config
