@@ -17,7 +17,7 @@ containerization** — the shape of a real infra tool, not a one-off script.
 
 ## Architecture
 
-```
+```text
 config.yaml (regions, shapes, credentials via env vars)
         │
         ▼
@@ -41,14 +41,14 @@ Two ways to run it:
 
 ## Project layout
 
-```
+```text
 oracle-capacity-hunter/
 ├── src/capacity_hunter/
 │   ├── config.py      # loads + validates config.yaml, expands ${ENV_VARS}
-│   ├── finder.py       # core hunting logic (OCI SDK calls, retry, backoff)
-│   ├── notifier.py     # Telegram notifications (easy to extend: Slack, email, ...)
-│   └── cli.py           # `capacity-hunter --config config.yaml [--once]`
-├── tests/                # pytest, all OCI SDK calls mocked - no real cloud needed to test
+│   ├── finder.py      # core hunting logic (OCI SDK calls, retry, backoff)
+│   ├── notifier.py    # Telegram notifications (easy to extend: Slack, email, ...)
+│   └── cli.py         # `capacity-hunter --config config.yaml [--once]`
+├── tests/             # pytest, all OCI SDK calls mocked - no real cloud needed to test
 ├── Dockerfile
 ├── docker-compose.yml
 ├── config.example.yaml
@@ -86,6 +86,7 @@ VMs, networks, storage live inside a compartment.
 | `subnet_id` | From your VCN/subnet — see the companion Terraform project (`network.tf`) if you set that up first, or Console → Networking → VCN → your subnet |
 
 Or via CLI, once `oci setup config` is done:
+
 ```bash
 oci iam compartment list --all
 ```
@@ -156,4 +157,6 @@ ruff check src tests      # lint
 
 MIT — see `LICENSE`.
 
-<!-- example feature branch marker -->
+## Auto env sync
+
+After a successful launch, the tool can resolve VNIC IPs, update a local .env file, and send a Telegram message with a ready-to-run SSH command.

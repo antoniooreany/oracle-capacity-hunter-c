@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import oci
+import oci  # TODO: not resolved
 import pytest
 
 from capacity_hunter.config import load_config
@@ -149,3 +149,85 @@ def test_unexpected_service_error_propagates(config_yaml, monkeypatch):
 
     with pytest.raises(oci.exceptions.ServiceError):
         hunter.run_once()
+
+import base64
+
+
+def test_metadata_includes_only_ssh_key_without_user_data(config_yaml, monkeypatch):
+    _make_identity_client(monkeypatch, ["AD-1"])
+    _make_compute_client(monkeypatch)
+
+    config = load_config(config_yaml)
+    hunter = CapacityHunter(config, notifier=MagicMock(spec=TelegramNotifier))
+
+    metadata = hunter._metadata()
+
+    assert "ssh_authorized_keys" in metadata
+    assert "user_data" not in metadata
+
+
+def test_metadata_includes_user_data_when_configured(tmp_path, config_yaml, monkeypatch):
+    _make_identity_client(monkeypatch, ["AD-1"])
+    _make_compute_client(monkeypatch)
+
+    user_data = tmp_path / "cloud-init.yaml"
+    user_data.write_text("#cloud-config\npackages:\n  - htop\n", encoding="utf-8")
+
+    config = load_config(config_yaml)
+    config.instance.user_data_path = str(user_data)
+
+    hunter = CapacityHunter(config, notifier=MagicMock(spec=TelegramNotifier))
+    metadata = hunter._metadata()
+
+    assert "ssh_authorized_keys" in metadata
+    assert "user_data" in metadata
+    decoded = base64.b64decode(metadata["user_data"]).decode("utf-8")
+    assert "#cloud-config" in decoded
+    assert "htop" in decoded
+
+
+def test_announce_already_running_message(config_yaml, monkeypatch):
+    config = load_config(config_yaml)
+    notifier = MagicMock(spec=TelegramNotifier)
+    hunter = CapacityHunter(config, notifier=notifier)
+
+    result = MagicMock(
+        instance_id="ocid1.instance.oc1..already",
+        public_ip=None,
+        availability_domain=None,
+        region="eu-milan-1",
+    )
+
+    hunter._announce(result)
+
+    notifier.send.assert_called_once()
+    sent = notifier.send.call_args[0][0]
+    assert "already running" in sent.lower()
+    assert "eu-milan-1" in sent
+
+
+def test_announce_notify_mode_message(config_yaml, monkeypatch):
+    config = load_config(config_yaml)
+    notifier = MagicMock(spec=TelegramNotifier)
+    hunter = CapacityHunter(config, notifier=notifier)
+
+    shape = MagicMock()
+    shape.name = "VM.Standard.A1.Flex"
+
+    result = MagicMock(
+        instance_id=None,
+        public_ip=None,
+        availability_domain="AD-1",
+        region="eu-milan-1",
+        shape=shape,
+    )
+
+    hunter._announce(result)
+
+    notifier.send.assert_called_once()
+    sent = notifier.send.call_args[0][0]
+    assert "capacity is available" in sent.lower()
+    assert "mode=notify" in sent.lower()
+    assert "VM.Standard.A1.Flex" in sent
+
+

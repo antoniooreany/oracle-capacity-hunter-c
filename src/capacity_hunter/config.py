@@ -18,7 +18,7 @@ class ConfigError(Exception):
 
 def _expand_env(value: Any) -> Any:
     if isinstance(value, str):
-        def repl(match: re.Match) -> str:
+        def repl(match: re.Match[str]) -> str:
             name = match.group(1)
             if name not in os.environ:
                 raise ConfigError(f"Environment variable '{name}' is not set (required by config)")
@@ -112,3 +112,4 @@ def load_config(path: str | Path) -> HunterConfig:
             chat_id=telegram_section.get("chat_id"),
         ),
     )
+
