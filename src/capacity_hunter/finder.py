@@ -50,8 +50,7 @@ class CapacityHunter:
         return [ad.name for ad in response.data]
 
     def _already_running(self, compute_client):
-    \"\"\"Temporary stub in dry-run: never treat anything as already running.\"\"\"
-    return None
+        return None  # TODO: implement
         if self._config.instance.user_data_path:
             with open(self._config.instance.user_data_path, "rb") as fh:
                 meta["user_data"] = base64.b64encode(fh.read()).decode("ascii")
@@ -182,6 +181,7 @@ class CapacityHunter:
             )
         logger.info(msg)
         self._notifier.send(msg)
+
 
 
 
