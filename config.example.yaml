@@ -1,36 +1,36 @@
-oci:
-  config_file: ~/.oci/config
-  profile: DEFAULT
-  compartment_id: ocid1.compartment.oc1..replace_me
-  subnet_id: ocid1.subnet.oc1..replace_me
-  ssh_public_key_path: ~/.ssh/id_rsa.pub
+# Generic example config for Oracle Capacity Hunter.
+#
+# All secrets are taken from environment variables like ${ENV_VAR}.
+# Never commit real OCIDs or tokens.
 
-search:
-  regions:
-    - eu-frankfurt-1
-    - eu-amsterdam-1
-    - eu-milan-1
-  shapes:
-    - shape: VM.Standard.A1.Flex
-      ocpus: 2
-      memory_gbs: 12
-    - shape: VM.Standard.E2.1.Micro
-      ocpus: 1
-      memory_gbs: 1
-  image_operating_system: Oracle Linux
-  image_operating_system_version: "9"
-  max_attempts_per_target: 1
-  sleep_seconds_between_regions: 2
+regions:
+  # List of OCI regions to hunt in.
+  - eu-milan-1
 
-launch:
-  enabled: false
+shapes:
+  # Minimal example: one ARM A1 shape.
+  - name: VM.Standard.A1.Flex
+    ocpus: 1
+    memory_in_gbs: 6
+
+mode: notify  # or "create"
+
+min_interval_seconds: 30
+max_interval_seconds: 300
+
+instance:
+  display_name: oracle-capacity-hunter-a1
+  compartment_id: ${OCI_COMPARTMENT_ID}
+  image_id: ${OCI_IMAGE_ID}
+  subnet_id: ${OCI_SUBNET_ID}
   assign_public_ip: true
-  display_name_prefix: capacity-hunter
 
-post_launch:
-  env_file_path: .env
-  ssh_user: ubuntu
-  ssh_private_key_path: ~/.ssh/id_ed25519
-  telegram_enabled: false
-  telegram_bot_token: ""
-  telegram_chat_id: ""
+  ssh_public_key_path: ${SSH_PUBLIC_KEY_PATH}
+  user_data_path: ${USER_DATA_PATH}
+
+oci_config_file: ${OCI_CONFIG_FILE:-$HOME/.oci/config}
+oci_config_profile: ${OCI_CONFIG_PROFILE:-DEFAULT}
+
+telegram:
+  bot_token: ${TELEGRAM_BOT_TOKEN}
+  chat_id: ${TELEGRAM_CHAT_ID}

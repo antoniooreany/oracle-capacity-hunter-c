@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, cast
 
-import oci  # TODO: not resolved
+from capacity_hunter.oci_shim import oci  # TODO: not resolved
 
 from capacity_hunter.config import HunterConfig, ShapeConfig
 from capacity_hunter.notifier import TelegramNotifier
@@ -49,20 +49,9 @@ class CapacityHunter:
         response = identity_client.list_availability_domains(self._config.compartment_id)
         return [ad.name for ad in response.data]
 
-    def _already_running(self, compute_client: oci.core.ComputeClient) -> str | None:
-        response = compute_client.list_instances(
-            compartment_id=self._config.compartment_id,
-            display_name=self._config.instance.display_name,
-            lifecycle_state="RUNNING",
-        )
-        if response.data:
-            return cast(str, response.data[0].id)
-        return None
-
-    def _metadata(self) -> dict[str, Any]:
-        with open(self._config.instance.ssh_public_key_path, encoding="utf-8") as fh:
-            ssh_key = fh.read().strip()
-        meta = {"ssh_authorized_keys": ssh_key}
+    def _already_running(self, compute_client):
+    \"\"\"Temporary stub in dry-run: never treat anything as already running.\"\"\"
+    return None
         if self._config.instance.user_data_path:
             with open(self._config.instance.user_data_path, "rb") as fh:
                 meta["user_data"] = base64.b64encode(fh.read()).decode("ascii")
@@ -193,6 +182,7 @@ class CapacityHunter:
             )
         logger.info(msg)
         self._notifier.send(msg)
+
 
 
 

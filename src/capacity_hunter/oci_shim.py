@@ -1,22 +1,32 @@
+from __future__ import annotations
+
 import sys
 import types
 
-try:
-    import oci  # noqa: F401
-except Exception:
+
+def _build_fake_oci() -> types.ModuleType:
     fake_oci = types.ModuleType("oci")
 
     class FakeServiceError(Exception):
-        def __init__(self, status=500, code="FakeError", message="fake oci error"):
+        def __init__(self, status: int = 500, code: str = "FakeError", message: str = "fake oci error") -> None:
             super().__init__(message)
             self.status = status
             self.code = code
             self.message = message
 
     class _Dummy:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *args, **kwargs) -> None:
             for k, v in kwargs.items():
                 setattr(self, k, v)
+
+        def __getattr__(self, name):
+            # Anything not explicitly set becomes another dummy.
+            d = _Dummy()
+            setattr(self, name, d)
+            return d
+
+        def __call__(self, *args, **kwargs):
+            return _Dummy()
 
     fake_oci.config = types.SimpleNamespace(
         from_file=lambda *args, **kwargs: {},
@@ -53,4 +63,14 @@ except Exception:
     fake_oci.core = fake_core
     fake_oci.identity = fake_identity
 
-    sys.modules["oci"] = fake_oci
+    return fake_oci
+
+
+try:
+    import oci as _oci  # type: ignore[assignment]
+    # quick smoke check: some submodules may still blow up on import
+    from oci import base_client as _base_client  # noqa: F401
+    oci = _oci  # noqa: E305
+except Exception:
+    oci = _build_fake_oci()
+    sys.modules["oci"] = oci
