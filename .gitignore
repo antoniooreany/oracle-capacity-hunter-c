@@ -11,3 +11,5 @@ venv/
 config.yaml
 *.pem
 .env
+config-milan-*.yaml
+uv.lock

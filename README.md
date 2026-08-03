@@ -17,6 +17,44 @@ containerization** — the shape of a real infra tool, not a one-off script.
 
 ## Architecture
 
+## Runtime behavior
+
+Oracle Capacity Hunter can run in two modes: a single-pass `--once` run, designed for cron/CI, and a long-lived loop with exponential backoff.[attached_file:1]
+In loop mode it keeps probing regions/ADs/shapes until capacity is found; in one-shot mode it performs a single scan and exits without busy-waiting.[attached_file:1]
+
+## Exit codes
+
+These codes reflect high-level outcomes; details may evolve, but the semantics are stable:
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Successful run, or no capacity found in `--once` mode when that outcome is considered non-fatal for scheduled checks.[attached_file:1] |
+| `1` | Unrecoverable configuration or OCI/API error (bad credentials, invalid compartment/image/subnet, missing config).[attached_file:1] |
+| `>1` | Reserved for future granular failure modes (e.g., hard network failure vs misconfiguration). |
+
+In CI/cron scenarios you can treat non-zero exit codes as “operator action required” and zero as “no work needed right now”.[attached_file:1]
+
+## Failure semantics
+
+The hunter distinguishes between recoverable and unrecoverable failures:[attached_file:1]
+
+- Recoverable: out-of-capacity responses, transient throttling (429), and network/API blips.[attached_file:1]
+- Unrecoverable: invalid OCI config, missing required IDs, bad credentials, or incompatible shapes/regions.[attached_file:1]
+
+In loop mode, recoverable errors are retried with backoff; unrecoverable errors abort the run with a non-zero exit code.[attached_file:1]
+In `--once` mode, “no capacity found” is treated as a normal outcome (exit 0), while unrecoverable errors still cause a non-zero exit.[attached_file:1]
+
+## Config reference (runtime-related)
+
+Whenever you add new runtime- or error-handling-related config keys (e.g., backoff tuning, notification modes, extra retries), document for each:[attached_file:1]
+
+- Whether the key is required or optional.
+- The default value if omitted.
+- How it interacts with `mode=notify` / `mode=create` and `--once`.[attached_file:1]
+
+Keep at least one realistic `config.yaml` snippet up to date so users can copy-paste a working example.[attached_file:1]
+
+
 ```
 config.yaml (regions, shapes, credentials via env vars)
         │
@@ -158,3 +196,4 @@ MIT — see `LICENSE`.
 
 ## Auto env sync
 After a successful launch, the tool can resolve VNIC IPs, update a local .env file, and send a Telegram message with a ready-to-run SSH command.
+
