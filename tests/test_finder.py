@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import base64
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import oci
-import base64
 import pytest
 
 from capacity_hunter.config import load_config
