@@ -4,6 +4,11 @@ on:
   issue_comment:
     types: [created]
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 jobs:
   review-pr:
     if: >
@@ -38,3 +43,80 @@ jobs:
 
           echo "Generated payload:"
           cat code_to_docs_payload.json
+
+      - name: Update PR title and body
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_OWNER: ${{ github.repository_owner }}
+          GH_REPO: ${{ github.event.repository.name }}
+          GH_PR: ${{ github.event.issue.number }}
+        shell: python
+        run: |
+          import json
+          import os
+          import urllib.request
+
+          owner = os.environ["GH_OWNER"]
+          repo = os.environ["GH_REPO"]
+          pr = os.environ["GH_PR"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          with open("code_to_docs_payload.json", "r", encoding="utf-8") as fh:
+              payload = json.load(fh)
+
+          body = {
+              "title": payload["title"],
+              "body": payload["body_md"],
+          }
+
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr}",
+              data=json.dumps(body).encode("utf-8"),
+              method="PATCH",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "Content-Type": "application/json",
+              },
+          )
+
+          with urllib.request.urlopen(req) as resp:
+              print(resp.read().decode("utf-8"))
+
+      - name: Apply labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_OWNER: ${{ github.repository_owner }}
+          GH_REPO: ${{ github.event.repository.name }}
+          GH_PR: ${{ github.event.issue.number }}
+        shell: python
+        run: |
+          import json
+          import os
+          import urllib.request
+
+          owner = os.environ["GH_OWNER"]
+          repo = os.environ["GH_REPO"]
+          pr = os.environ["GH_PR"]
+          token = os.environ["GITHUB_TOKEN"]
+
+          with open("code_to_docs_payload.json", "r", encoding="utf-8") as fh:
+              payload = json.load(fh)
+
+          body = {
+              "labels": payload.get("labels", []),
+          }
+
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{owner}/{repo}/issues/{pr}/labels",
+              data=json.dumps(body).encode("utf-8"),
+              method="POST",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "Content-Type": "application/json",
+              },
+          )
+
+          with urllib.request.urlopen(req) as resp:
+              print(resp.read().decode("utf-8"))
