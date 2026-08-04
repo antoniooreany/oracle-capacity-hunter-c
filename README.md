@@ -158,3 +158,10 @@ MIT — see `LICENSE`.
 
 ## Auto env sync
 After a successful launch, the tool can resolve VNIC IPs, update a local .env file, and send a Telegram message with a ready-to-run SSH command.
+## Running the UI
+
+Create and activate a virtual environment, install dependencies, then run:
+
+```bash
+streamlit run src/capacity_hunter/ui/streamlit_app.py
+```
