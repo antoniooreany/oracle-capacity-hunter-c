@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from capacity_hunter.config import load_config
-from capacity_hunter.finder import find_capacity
+from capacity_hunter.finder import CapacityHunter
 from capacity_hunter.notifier import format_capacity_summary
 
 
@@ -44,18 +44,14 @@ def main() -> None:
             step=0.01,
         )
 
-        if st.button("Find capacity", type="primary"):
-            with st.spinner("Searching for capacity..."):
-                result = find_capacity(
-                    region=region,
-                    shape=shape,
-                    max_price=max_price,
-                    config=config,
-                )
+      if st.button("Find capacity", type="primary"):
+          with st.spinner("Searching for capacity..."):
+              hunter = CapacityHunter(config=config, notifier=None)
+              result = hunter.run_once()
 
-            summary = format_capacity_summary(result)
-            st.success("Capacity search completed.")
-            st.markdown(summary)
+          summary = format_capacity_summary(result)
+          st.success("Capacity search completed.")
+          st.markdown(summary)
 
     with col_right:
         st.subheader("Current config snapshot")
