@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.code_to_docs import build_payload
+from capacity_hunter.code_to_docs import build_payload
 
 
 def test_build_payload_contains_required_keys() -> None:
