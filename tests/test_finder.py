@@ -4,12 +4,7 @@ import base64
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-<<<<<<< HEAD
-import base64
 import oci
-=======
-import oci
-import base64
 import pytest
 
 from capacity_hunter.config import load_config
@@ -17,7 +12,7 @@ from capacity_hunter.finder import CapacityHunter
 from capacity_hunter.notifier import TelegramNotifier
 
 
-def _ad(name):
+def _ad(name: str) -> SimpleNamespace:
     return SimpleNamespace(name=name)
 
 
@@ -34,7 +29,9 @@ def _make_compute_client(monkeypatch, *, existing_instance=None, launch_side_eff
         client.launch_instance.return_value = SimpleNamespace(
             data=SimpleNamespace(id="ocid1.instance.oc1..new")
         )
-    client.get_instance.return_value = SimpleNamespace(data=SimpleNamespace(id="ocid1.instance.oc1..new"))
+    client.get_instance.return_value = SimpleNamespace(
+        data=SimpleNamespace(id="ocid1.instance.oc1..new")
+    )
     client.list_vnic_attachments.return_value = SimpleNamespace(
         data=[SimpleNamespace(vnic_id="ocid1.vnic.oc1..fake")]
     )
@@ -208,6 +205,7 @@ def test_announce_already_running_message(config_yaml, monkeypatch):
     sent = notifier.send.call_args[0][0]
     assert "already running" in sent.lower()
     assert "eu-milan-1" in sent
+    assert "ocid1.instance.oc1..already" in sent
 
 
 def test_announce_notify_mode_message(config_yaml, monkeypatch):
@@ -233,5 +231,4 @@ def test_announce_notify_mode_message(config_yaml, monkeypatch):
     assert "capacity is available" in sent.lower()
     assert "mode=notify" in sent.lower()
     assert "VM.Standard.A1.Flex" in sent
-
-
+    
