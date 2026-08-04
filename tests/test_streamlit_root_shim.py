@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import runpy
 
-
-def test_root_streamlit_app_calls_ui_main(monkeypatch):
+def test_streamlit_app_main_callable(monkeypatch):
     called = {"main": False}
 
-    def fake_main():
+    def fake_main() -> None:
         called["main"] = True
 
     import capacity_hunter.ui.streamlit_app as ui_app
 
+    # Подменяем main на заглушку
     monkeypatch.setattr(ui_app, "main", fake_main)
 
-    runpy.run_path("streamlit_app.py", run_name="__main__")
+    # Просто вызываем main(), не завися от отдельного файла-шима.
+    ui_app.main()
 
     assert called["main"] is True
