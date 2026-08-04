@@ -1,10 +1,11 @@
 param(
     [string]$BaseBranch = "develop",
-    [string]$Title = "Temporary: will be updated by docs-assistant"
+    [string]$Title = "Feature: Streamlit UI and OCI config alignment"
 )
 
 $ErrorActionPreference = "Stop"
 
+# 1. Определяем текущую ветку
 $CurrentBranch = git rev-parse --abbrev-ref HEAD
 
 if ($CurrentBranch -eq $BaseBranch) {
@@ -14,15 +15,27 @@ if ($CurrentBranch -eq $BaseBranch) {
 
 Write-Host "Creating PR from '$CurrentBranch' into '$BaseBranch'..." -ForegroundColor Cyan
 
+# 2. Коммиты и изменённые файлы
+$CommitsRange = "$BaseBranch..$CurrentBranch"
+$CommitsList = git log --oneline $CommitsRange
+$ChangedFiles = git diff --name-only "$BaseBranch...$CurrentBranch"
+
+if (-not $ChangedFiles) {
+    Write-Host "No changes between $BaseBranch and $CurrentBranch, nothing to PR." -ForegroundColor Yellow
+    exit 1
+}
+
+$ChangesLines = $ChangedFiles | ForEach-Object { "- $_" } | Out-String
+
+# 3. Стандартный Markdown‑body
 $Body = @"
-This PR was created locally and is intended to be updated by the docs-assistant workflow.
+## Summary
 
-Please trigger the workflow using `[review-pr]` in a comment to refresh title, body, and labels.
+Introduce changes from branch `$CurrentBranch` into `$BaseBranch`. This PR is intended to be further refined by the docs-assistant workflow (Code-to-Docs) based on the actual diff and file set.
+
+## Changes
+
+$ChangesLines
+## Commits
+
 "@
-
-gh pr create `
-  --base $BaseBranch `
-  --head $CurrentBranch `
-  --title $Title `
-  --body $Body
-  
