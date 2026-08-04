@@ -19,7 +19,7 @@ def main() -> None:
         "Streamlit UI over capacity_hunter core: config, finder, notifier."
     )
 
-    # Load config (you can adapt this to your real config model)
+    # Load config (adapt to your real config model if needed)
     config = load_config()
 
     col_left, col_right = st.columns([2, 1])
@@ -39,24 +39,29 @@ def main() -> None:
         max_price = st.slider(
             "Max hourly price",
             min_value=0.0,
-            max_value=float(config.max_price or 1.0),
-            value=float(config.max_price or 0.5),
+            max_value=float(getattr(config, "max_price", 1.0) or 1.0),
+            value=float(getattr(config, "max_price", 0.5) or 0.5),
             step=0.01,
         )
 
-      if st.button("Find capacity", type="primary"):
-          with st.spinner("Searching for capacity..."):
-              hunter = CapacityHunter(config=config, notifier=None)
-              result = hunter.run_once()
+        if st.button("Find capacity", type="primary"):
+            with st.spinner("Searching for capacity..."):
+                # Simple wrapper: use CapacityHunter with current config
+                hunter = CapacityHunter(config=config, notifier=None)
+                result = hunter.run_once()
 
-          summary = format_capacity_summary(result)
-          st.success("Capacity search completed.")
-          st.markdown(summary)
+            summary = format_capacity_summary(result)
+            st.success("Capacity search completed.")
+            st.markdown(summary)
 
     with col_right:
         st.subheader("Current config snapshot")
-        st.json(config.model_dump() if hasattr(config, "model_dump") else config)
+        if hasattr(config, "model_dump"):
+            st.json(config.model_dump())
+        else:
+            st.json(config)
 
 
 if __name__ == "__main__":
     main()
+    
