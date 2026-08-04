@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 import streamlit as st
 
 from capacity_hunter.config import load_config
 from capacity_hunter.finder import CapacityHunter
-from capacity_hunter.notifier import format_capacity_summary
+from capacity_hunter.notifier import TelegramNotifier, format_capacity_summary
 
 
 def main() -> None:
@@ -44,15 +46,49 @@ def main() -> None:
             step=0.01,
         )
 
-        if st.button("Find capacity", type="primary"):
-            with st.spinner("Searching for capacity..."):
-                # Simple wrapper: use CapacityHunter with current config
-                hunter = CapacityHunter(config=config, notifier=None)
-                result = hunter.run_once()
+        run_forever = st.checkbox(
+            "Run continuously (run_forever)", value=False
+        )
+
+        if st.button("Run hunter", type="primary"):
+            with st.spinner("Running capacity hunter..."):
+                # Configure notifier if needed; here TelegramNotifier is an example
+                notifier = TelegramNotifier(config=config)
+
+                hunter = CapacityHunter(
+                    config=config,
+                    notifier=notifier,
+                    region=region,
+                    shape=shape,
+                    max_price=max_price,
+                    run_forever=run_forever,
+                )
+
+                # Capture finder logs into Streamlit text area
+                finder_logger = logging.getLogger("capacity_hunter.finder")
+                log_messages: list[str] = []
+
+                class StreamlitHandler(logging.Handler):
+                    def emit(self, record: logging.LogRecord) -> None:
+                        log_messages.append(self.format(record))
+
+                handler = StreamlitHandler()
+                handler.setLevel(logging.INFO)
+                handler.setFormatter(logging.Formatter("%(message)s"))
+                finder_logger.addHandler(handler)
+
+                try:
+                    result = hunter.run_once()
+                finally:
+                    finder_logger.removeHandler(handler)
 
             summary = format_capacity_summary(result)
             st.success("Capacity search completed.")
             st.markdown(summary)
+
+            if log_messages:
+                st.subheader("Finder logs")
+                st.text("\n".join(log_messages))
 
     with col_right:
         st.subheader("Current config snapshot")
