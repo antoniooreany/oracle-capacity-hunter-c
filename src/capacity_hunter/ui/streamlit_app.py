@@ -1,10 +1,28 @@
 from __future__ import annotations
 
+import logging
+
 import streamlit as st
 
 from capacity_hunter.config import ConfigError, load_config
 from capacity_hunter.finder import CapacityHunter
 from capacity_hunter.notifier import TelegramNotifier
+
+
+class StreamlitLogHandler(logging.Handler):
+    """Logging handler that streams formatted records into a Streamlit placeholder."""
+
+    def __init__(self, placeholder: st.delta_generator.DeltaGenerator) -> None:
+        super().__init__()
+        self._placeholder = placeholder
+        self._lines: list[str] = []
+        self.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._lines.append(self.format(record))
+        # Keep the last N lines so the box doesn't grow unbounded.
+        tail = self._lines[-200:]
+        self._placeholder.code("\n".join(tail), language="log")
 
 
 def main() -> None:
@@ -45,11 +63,21 @@ def main() -> None:
         run_forever = st.checkbox("Run continuously (run_forever)", value=False)
 
         if st.button("Run hunter", type="primary"):
-            notifier = TelegramNotifier(config.telegram) if config.telegram else None
-            hunter = CapacityHunter(config, notifier=notifier)
+            st.subheader("Live log")
+            log_placeholder = st.empty()
+            log_placeholder.code("Starting search...", language="log")
 
-            with st.spinner("Searching for capacity..."):
+            handler = StreamlitLogHandler(log_placeholder)
+            finder_logger = logging.getLogger("capacity_hunter.finder")
+            finder_logger.addHandler(handler)
+            finder_logger.setLevel(logging.INFO)
+
+            try:
+                notifier = TelegramNotifier(config.telegram) if config.telegram else None
+                hunter = CapacityHunter(config, notifier=notifier)
                 result = hunter.run_forever() if run_forever else hunter.run_once()
+            finally:
+                finder_logger.removeHandler(handler)
 
             if result.found:
                 st.success("Capacity found!")
@@ -81,3 +109,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
