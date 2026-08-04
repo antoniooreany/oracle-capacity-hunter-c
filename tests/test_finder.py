@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -9,7 +10,6 @@ import oci
 =======
 import oci
 import base64
->>>>>>> fa3cee3 (chore: fix ruff E402 in finder tests)
 import pytest
 
 from capacity_hunter.config import load_config
