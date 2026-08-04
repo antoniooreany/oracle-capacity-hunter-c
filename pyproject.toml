@@ -28,6 +28,9 @@ dev = [
   "mypy>=1.11.1",
   "types-PyYAML>=6.0.12.20240808"
 ]
+ui = [
+  "streamlit>=1.35"
+]
 
 [project.scripts]
 oci-hunter = "capacity_hunter.cli:main"
@@ -50,6 +53,3 @@ python_version = "3.11"
 strict = true
 ignore_missing_imports = true
 packages = ["capacity_hunter"]
-
-
-
