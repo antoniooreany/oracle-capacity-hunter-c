@@ -51,7 +51,7 @@ def test_build_payload_title_and_labels_consistent_prefix() -> None:
     labels = payload["labels"]
 
     # Find type:* label, if any
-    type_labels = [l for l in labels if l.startswith("type:")]
+    type_labels = [label for label in labels if label.startswith("type:")]
     if not type_labels:
         # If there is no type label, nothing to assert here
         return
