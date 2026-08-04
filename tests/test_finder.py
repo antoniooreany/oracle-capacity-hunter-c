@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import base64
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import base64
 import oci
 import pytest
 
