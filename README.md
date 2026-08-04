@@ -17,7 +17,7 @@ containerization** — the shape of a real infra tool, not a one-off script.
 
 ## Architecture
 
-```
+```text
 config.yaml (regions, shapes, credentials via env vars)
         │
         ▼
@@ -41,14 +41,14 @@ Two ways to run it:
 
 ## Project layout
 
-```
+```text
 oracle-capacity-hunter/
 ├── src/capacity_hunter/
-│   ├── config.py      # loads + validates config.yaml, expands ${ENV_VARS}
+│   ├── config.py       # loads + validates config.yaml, expands ${ENV_VARS}
 │   ├── finder.py       # core hunting logic (OCI SDK calls, retry, backoff)
 │   ├── notifier.py     # Telegram notifications (easy to extend: Slack, email, ...)
-│   └── cli.py           # `capacity-hunter --config config.yaml [--once]`
-├── tests/                # pytest, all OCI SDK calls mocked - no real cloud needed to test
+│   └── cli.py          # `capacity-hunter --config config.yaml [--once]`
+├── tests/              # pytest, all OCI SDK calls mocked - no real cloud needed to test
 ├── Dockerfile
 ├── docker-compose.yml
 ├── config.example.yaml
@@ -77,15 +77,16 @@ OCI's resource hierarchy: **Tenancy** (your account) → **Compartment** (like a
 VMs, networks, storage live inside a compartment.
 
 | Value | Where to find it |
-|---|---|
+| --- | --- |
 | `compartment_id` | Console → ☰ Menu → Identity & Security → Compartments → open the root compartment (named after your tenancy) → copy its OCID. Or just use the **tenancy** OCID itself — using the root compartment is fine for a personal project. |
-| `tenancy` OCID | Console → profile icon (top right) → "Tenancy: <name>" → OCID at the bottom |
-| `user` OCID | Console → profile icon → "My profile" → OCID under your username |
-| `fingerprint` + private key | Console → "My profile" → API Keys → "Add API Key" → "Generate API Key Pair" → download the `.pem`, note the fingerprint shown |
+| `tenancy` OCID | Console → profile icon (top right) → "Tenancy: \<name\>" → OCID at the bottom. |
+| `user` OCID | Console → profile icon → "My profile" → OCID under your username. |
+| `fingerprint` + private key | Console → "My profile" → API Keys → "Add API Key" → "Generate API Key Pair" → download the `.pem`, note the fingerprint shown. |
 | `image_id` | `oci compute image list --compartment-id <id> --operating-system "Canonical Ubuntu" --operating-system-version "22.04" --shape "VM.Standard.A1.Flex"` |
-| `subnet_id` | From your VCN/subnet — see the companion Terraform project (`network.tf`) if you set that up first, or Console → Networking → VCN → your subnet |
+| `subnet_id` | From your VCN/subnet — see the companion Terraform project (`network.tf`) if you set that up first, or Console → Networking → VCN → your subnet. |
 
 Or via CLI, once `oci setup config` is done:
+
 ```bash
 oci iam compartment list --all
 ```
@@ -113,6 +114,24 @@ export TELEGRAM_CHAT_ID=...     # optional
 capacity-hunter --config config.yaml --once   # single check
 capacity-hunter --config config.yaml          # loop until found
 ```
+
+## Running the UI
+
+Install the project in editable mode, then run the UI:
+
+```bash
+pip install -e .
+capacity-hunter-ui
+```
+
+Alternative direct launch (dev mode):
+
+```bash
+streamlit run src/capacity_hunter/ui/streamlit_app.py
+```
+
+The UI runs a single pass via `CapacityHunter.run_once()` using the same `config.yaml` as the CLI.
+It’s handy for manual checks and debugging; for long-lived hunting use the CLI or Docker.
 
 ## Running in Docker
 
@@ -152,24 +171,11 @@ ruff check src tests      # lint
 - **Multi-cloud fallback**: extend `finder.py` with a second backend (e.g. Fly.io or a different
   Oracle tenancy) so the hunter tries elsewhere if OCI stays out of capacity for too long.
 
+## Auto env sync
+
+After a successful launch, the tool can resolve VNIC IPs, update a local `.env` file, and send a
+Telegram message with a ready-to-run SSH command.
+
 ## License
 
 MIT — see `LICENSE`.
-
-## Auto env sync
-After a successful launch, the tool can resolve VNIC IPs, update a local .env file, and send a Telegram message with a ready-to-run SSH command.
-## Running the UI
-
-Install the project in editable mode, then run the UI with:
-
-```bash
-pip install -e .
-capacity-hunter-ui
-```
-
-Alternative direct launch:
-
-```bash
-streamlit run src/capacity_hunter/ui/streamlit_app.py
-```
-
