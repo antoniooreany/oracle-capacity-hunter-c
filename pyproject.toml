@@ -53,3 +53,4 @@ python_version = "3.11"
 strict = true
 ignore_missing_imports = true
 packages = ["capacity_hunter"]
+
