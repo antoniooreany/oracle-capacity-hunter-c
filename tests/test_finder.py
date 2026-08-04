@@ -3,7 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import oci  # TODO: not resolved
+import oci
+import base64
 import pytest
 
 from capacity_hunter.config import load_config
@@ -149,8 +150,6 @@ def test_unexpected_service_error_propagates(config_yaml, monkeypatch):
 
     with pytest.raises(oci.exceptions.ServiceError):
         hunter.run_once()
-
-import base64
 
 
 def test_metadata_includes_only_ssh_key_without_user_data(config_yaml, monkeypatch):
