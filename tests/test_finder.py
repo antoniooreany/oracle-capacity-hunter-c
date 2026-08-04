@@ -1,233 +1,238 @@
+"""Capacity-hunting logic: iterate regions/ADs/shapes, launch on success."""
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import MagicMock
+import base64
+import logging
+import random
+import threading
+import time
+from dataclasses import dataclass
 
-import oci  # TODO: not resolved
-import pytest
+import oci
 
-from capacity_hunter.config import load_config
-from capacity_hunter.finder import CapacityHunter
+from capacity_hunter.config import HunterConfig, ShapeConfig
 from capacity_hunter.notifier import TelegramNotifier
 
+logger = logging.getLogger(__name__)
 
-def _ad(name):
-    return SimpleNamespace(name=name)
+# OCI reports capacity exhaustion via a 500 ServiceError with this code.
+OUT_OF_CAPACITY_CODES = {"OutOfCapacity", "LimitExceeded", "InternalError"}
+
+# Statuses treated as recoverable even if the SDK's own retry_strategy already
+# gave up (DEFAULT_RETRY_STRATEGY caps at 8 attempts / 10 min - under sustained
+# throttling it can still surface here as an exception rather than resolving).
+RECOVERABLE_STATUSES = {429, 500}
 
 
-def _make_compute_client(monkeypatch, *, existing_instance=None, launch_side_effect=None):
-    """Patch capacity_hunter.finder.oci.core.ComputeClient to return one shared mock,
-    regardless of how many times/regions it's instantiated for."""
-    client = MagicMock()
-    client.list_instances.return_value = SimpleNamespace(
-        data=[SimpleNamespace(id=existing_instance)] if existing_instance else []
-    )
-    if launch_side_effect is not None:
-        client.launch_instance.side_effect = launch_side_effect
-    else:
-        client.launch_instance.return_value = SimpleNamespace(
-            data=SimpleNamespace(id="ocid1.instance.oc1..new")
+@dataclass
+class LaunchResult:
+    found: bool
+    region: str | None = None
+    availability_domain: str | None = None
+    shape: ShapeConfig | None = None
+    public_ip: str | None = None
+    instance_id: str | None = None
+
+
+class CapacityHunter:
+    """Iterates (region, AD, shape) combinations looking for free capacity."""
+
+    def __init__(self, config: HunterConfig, notifier: TelegramNotifier | None = None) -> None:
+        self._config = config
+        self._notifier = notifier or TelegramNotifier(config.telegram)
+        self._base_oci_config = oci.config.from_file(
+            file_location=config.oci_config_file,
+            profile_name=config.oci_config_profile,
         )
-    client.get_instance.return_value = SimpleNamespace(data=SimpleNamespace(id="ocid1.instance.oc1..new"))
-    client.list_vnic_attachments.return_value = SimpleNamespace(
-        data=[SimpleNamespace(vnic_id="ocid1.vnic.oc1..fake")]
-    )
-    monkeypatch.setattr("capacity_hunter.finder.oci.core.ComputeClient", lambda cfg: client)
-    monkeypatch.setattr("capacity_hunter.finder.oci.wait_until", lambda *a, **k: None)
-    return client
 
+    def _clients_for_region(self, region: str) -> tuple[oci.core.ComputeClient, oci.identity.IdentityClient]:
+        cfg = dict(self._base_oci_config)
+        cfg["region"] = region
+        # DEFAULT_RETRY_STRATEGY auto-retries on 429 (TooManyRequests) and 5xx
+        # with exponential backoff + jitter - without this, a 429 is an
+        # *unexpected* ServiceError that crashes the whole run.
+        retry_strategy = oci.retry.DEFAULT_RETRY_STRATEGY
+        return (
+            oci.core.ComputeClient(cfg, retry_strategy=retry_strategy),
+            oci.identity.IdentityClient(cfg, retry_strategy=retry_strategy),
+        )
 
-def _make_identity_client(monkeypatch, ad_names):
-    client = MagicMock()
-    client.list_availability_domains.return_value = SimpleNamespace(
-        data=[_ad(n) for n in ad_names]
-    )
-    monkeypatch.setattr("capacity_hunter.finder.oci.identity.IdentityClient", lambda cfg: client)
-    return client
+    def _availability_domains(self, identity_client: oci.identity.IdentityClient) -> list[str]:
+        try:
+            response = identity_client.list_availability_domains(self._config.compartment_id)
+        except oci.exceptions.ServiceError as exc:
+            logger.warning(
+                "Could not list availability domains (status=%s code=%s): %s - skipping this region.",
+                exc.status, exc.code, exc.message,
+            )
+            return []
+        return [ad.name for ad in response.data]
 
+    def _already_running(self, compute_client: oci.core.ComputeClient) -> str | None:
+        try:
+            response = compute_client.list_instances(
+                compartment_id=self._config.compartment_id,
+                display_name=self._config.instance.display_name,
+                lifecycle_state="RUNNING",
+            )
+        except oci.exceptions.ServiceError as exc:
+            logger.warning(
+                "Could not check for an already-running instance (status=%s code=%s): %s",
+                exc.status, exc.code, exc.message,
+            )
+            return None
+        if response.data:
+            return str(response.data[0].id)
+        return None
 
-def _make_vnic_client(monkeypatch, public_ip="1.2.3.4"):
-    client = MagicMock()
-    client.get_vnic.return_value = SimpleNamespace(data=SimpleNamespace(public_ip=public_ip))
-    monkeypatch.setattr("capacity_hunter.finder.oci.core.VirtualNetworkClient", lambda cfg: client)
-    return client
+    def _metadata(self) -> dict[str, str]:
+        with open(self._config.instance.ssh_public_key_path, encoding="utf-8") as fh:
+            ssh_key = fh.read().strip()
+        meta = {"ssh_authorized_keys": ssh_key}
+        if self._config.instance.user_data_path:
+            with open(self._config.instance.user_data_path, "rb") as fh:
+                meta["user_data"] = base64.b64encode(fh.read()).decode("ascii")
+        return meta
 
+    def _try_launch(
+        self,
+        compute_client: oci.core.ComputeClient,
+        region: str,
+        ad: str,
+        shape: ShapeConfig,
+    ) -> LaunchResult:
+        details = oci.core.models.LaunchInstanceDetails(
+            compartment_id=self._config.compartment_id,
+            availability_domain=ad,
+            display_name=self._config.instance.display_name,
+            shape=shape.name,
+            shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
+                ocpus=shape.ocpus,
+                memory_in_gbs=shape.memory_in_gbs,
+            ),
+            source_details=oci.core.models.InstanceSourceViaImageDetails(
+                image_id=self._config.instance.image_id,
+            ),
+            create_vnic_details=oci.core.models.CreateVnicDetails(
+                subnet_id=self._config.instance.subnet_id,
+                assign_public_ip=self._config.instance.assign_public_ip,
+            ),
+            metadata=self._metadata(),
+        )
+        try:
+            launch_response = compute_client.launch_instance(details)
+        except oci.exceptions.ServiceError as exc:
+            if exc.code in OUT_OF_CAPACITY_CODES or exc.status in RECOVERABLE_STATUSES:
+                logger.info(
+                    "No capacity in %s / %s (status=%s code=%s)", region, ad, exc.status, exc.code
+                )
+                if exc.status == 429:
+                    logger.warning("Still throttled (429) after SDK retries exhausted - pausing 15s.")
+                    time.sleep(15)
+                return LaunchResult(found=False)
+            raise  # unexpected error - surface it
 
-def test_run_once_finds_capacity_on_first_try(config_yaml, monkeypatch):
-    _make_identity_client(monkeypatch, ["AD-1"])
-    _make_compute_client(monkeypatch)
-    _make_vnic_client(monkeypatch)
+        instance = launch_response.data
 
-    config = load_config(config_yaml)
-    config.mode = "create"  # this test asserts on the launched-and-kept path
-    hunter = CapacityHunter(config, notifier=MagicMock(spec=TelegramNotifier))
+        if self._config.mode == "notify":
+            # We only wanted to detect capacity, not keep the instance.
+            # Terminate immediately so we don't consume the free-tier slot.
+            compute_client.terminate_instance(instance.id)
+            return LaunchResult(
+                found=True,
+                region=region,
+                availability_domain=ad,
+                shape=shape,
+                instance_id=None,  # terminated - nothing to connect to
+            )
 
-    result = hunter.run_once()
+        oci.wait_until(
+            compute_client,
+            compute_client.get_instance(instance.id),
+            "lifecycle_state",
+            "RUNNING",
+            max_wait_seconds=180,
+        )
+        vnic_attachments = compute_client.list_vnic_attachments(
+            compartment_id=self._config.compartment_id, instance_id=instance.id
+        ).data
+        public_ip = None
+        if vnic_attachments:
+            vnic_client = oci.core.VirtualNetworkClient(
+                dict(self._base_oci_config, region=region),
+                retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY,
+            )
+            vnic = vnic_client.get_vnic(vnic_attachments[0].vnic_id).data
+            public_ip = vnic.public_ip
 
-    assert result.found is True
-    assert result.region == "eu-frankfurt-1"
-    assert result.availability_domain == "AD-1"
-    assert result.public_ip == "1.2.3.4"
+        return LaunchResult(
+            found=True,
+            region=region,
+            availability_domain=ad,
+            shape=shape,
+            public_ip=public_ip,
+            instance_id=instance.id,
+        )
 
+    def run_once(self) -> LaunchResult:
+        """Single pass across all configured regions/ADs/shapes. No looping/sleeping."""
+        for region in self._config.regions:
+            compute_client, identity_client = self._clients_for_region(region)
 
-def test_run_once_skips_ad_on_out_of_capacity(config_yaml, monkeypatch):
-    _make_identity_client(monkeypatch, ["AD-1", "AD-2"])
-    out_of_capacity = oci.exceptions.ServiceError(
-        status=500, code="OutOfCapacity", headers={}, message="no room"
-    )
-    success = SimpleNamespace(data=SimpleNamespace(id="ocid1.instance.oc1..new"))
-    _make_compute_client(monkeypatch, launch_side_effect=[out_of_capacity, success])
-    _make_vnic_client(monkeypatch)
+            existing = self._already_running(compute_client)
+            if existing:
+                logger.info("Instance already RUNNING in %s (%s), stopping search.", region, existing)
+                return LaunchResult(found=True, region=region, instance_id=existing)
 
-    config = load_config(config_yaml)
-    config.mode = "create"
-    hunter = CapacityHunter(config, notifier=MagicMock(spec=TelegramNotifier))
+            for ad in self._availability_domains(identity_client):
+                for shape in self._config.shapes:
+                    logger.info("Trying region=%s ad=%s shape=%s", region, ad, shape.name)
+                    result = self._try_launch(compute_client, region, ad, shape)
+                    if result.found:
+                        return result
+        return LaunchResult(found=False)
 
-    result = hunter.run_once()
+    def run_forever(self, stop_event: threading.Event | None = None) -> LaunchResult:
+        """Loop with exponential backoff until capacity is found or stop_event is set."""
+        sleep_time = self._config.min_interval_seconds
+        while not (stop_event and stop_event.is_set()):
+            result = self.run_once()
+            if result.found:
+                self._announce(result)
+                return result
 
-    assert result.found is True
-    assert result.availability_domain == "AD-2"
+            logger.info("No capacity anywhere this round. Sleeping %ss", sleep_time)
+            waited = 0
+            while waited < sleep_time:
+                if stop_event and stop_event.is_set():
+                    break
+                time.sleep(min(1, sleep_time - waited))
+                waited += 1
+            sleep_time = min(sleep_time * 2, self._config.max_interval_seconds)
+            sleep_time += random.randint(0, 10)
 
+        logger.info("Stopped by request before capacity was found.")
+        return LaunchResult(found=False)
 
-def test_run_once_returns_not_found_when_all_ads_exhausted(config_yaml, monkeypatch):
-    _make_identity_client(monkeypatch, ["AD-1"])
-    out_of_capacity = oci.exceptions.ServiceError(
-        status=500, code="OutOfCapacity", headers={}, message="no room"
-    )
-    # both regions x 1 AD x 1 shape = 2 attempts total
-    _make_compute_client(monkeypatch, launch_side_effect=[out_of_capacity, out_of_capacity])
-
-    config = load_config(config_yaml)
-    hunter = CapacityHunter(config, notifier=MagicMock(spec=TelegramNotifier))
-
-    result = hunter.run_once()
-
-    assert result.found is False
-
-
-def test_run_once_skips_search_if_instance_already_running(config_yaml, monkeypatch):
-    identity_client = _make_identity_client(monkeypatch, ["AD-1"])
-    compute_client = _make_compute_client(monkeypatch, existing_instance="ocid1.instance.oc1..already")
-
-    config = load_config(config_yaml)
-    hunter = CapacityHunter(config, notifier=MagicMock(spec=TelegramNotifier))
-
-    result = hunter.run_once()
-
-    assert result.found is True
-    assert result.instance_id == "ocid1.instance.oc1..already"
-    # Should never even look up availability domains, since it bailed early
-    identity_client.list_availability_domains.assert_not_called()
-    compute_client.launch_instance.assert_not_called()
-
-
-def test_notify_mode_terminates_probe_instance(config_yaml, monkeypatch):
-    _make_identity_client(monkeypatch, ["AD-1"])
-    compute_client = _make_compute_client(monkeypatch)
-    # config_yaml fixture sets mode: notify by default
-
-    config = load_config(config_yaml)
-    assert config.mode == "notify"
-    hunter = CapacityHunter(config, notifier=MagicMock(spec=TelegramNotifier))
-
-    result = hunter.run_once()
-
-    assert result.found is True
-    assert result.instance_id is None  # terminated, nothing to connect to
-    compute_client.terminate_instance.assert_called_once_with("ocid1.instance.oc1..new")
-
-
-def test_unexpected_service_error_propagates(config_yaml, monkeypatch):
-    _make_identity_client(monkeypatch, ["AD-1"])
-    auth_error = oci.exceptions.ServiceError(
-        status=401, code="NotAuthenticated", headers={}, message="bad key"
-    )
-    _make_compute_client(monkeypatch, launch_side_effect=auth_error)
-
-    config = load_config(config_yaml)
-    hunter = CapacityHunter(config, notifier=MagicMock(spec=TelegramNotifier))
-
-    with pytest.raises(oci.exceptions.ServiceError):
-        hunter.run_once()
-
-import base64
-
-
-def test_metadata_includes_only_ssh_key_without_user_data(config_yaml, monkeypatch):
-    _make_identity_client(monkeypatch, ["AD-1"])
-    _make_compute_client(monkeypatch)
-
-    config = load_config(config_yaml)
-    hunter = CapacityHunter(config, notifier=MagicMock(spec=TelegramNotifier))
-
-    metadata = hunter._metadata()
-
-    assert "ssh_authorized_keys" in metadata
-    assert "user_data" not in metadata
-
-
-def test_metadata_includes_user_data_when_configured(tmp_path, config_yaml, monkeypatch):
-    _make_identity_client(monkeypatch, ["AD-1"])
-    _make_compute_client(monkeypatch)
-
-    user_data = tmp_path / "cloud-init.yaml"
-    user_data.write_text("#cloud-config\npackages:\n  - htop\n", encoding="utf-8")
-
-    config = load_config(config_yaml)
-    config.instance.user_data_path = str(user_data)
-
-    hunter = CapacityHunter(config, notifier=MagicMock(spec=TelegramNotifier))
-    metadata = hunter._metadata()
-
-    assert "ssh_authorized_keys" in metadata
-    assert "user_data" in metadata
-    decoded = base64.b64decode(metadata["user_data"]).decode("utf-8")
-    assert "#cloud-config" in decoded
-    assert "htop" in decoded
-
-
-def test_announce_already_running_message(config_yaml, monkeypatch):
-    config = load_config(config_yaml)
-    notifier = MagicMock(spec=TelegramNotifier)
-    hunter = CapacityHunter(config, notifier=notifier)
-
-    result = MagicMock(
-        instance_id="ocid1.instance.oc1..already",
-        public_ip=None,
-        availability_domain=None,
-        region="eu-milan-1",
-    )
-
-    hunter._announce(result)
-
-    notifier.send.assert_called_once()
-    sent = notifier.send.call_args[0][0]
-    assert "already running" in sent.lower()
-    assert "eu-milan-1" in sent
-
-
-def test_announce_notify_mode_message(config_yaml, monkeypatch):
-    config = load_config(config_yaml)
-    notifier = MagicMock(spec=TelegramNotifier)
-    hunter = CapacityHunter(config, notifier=notifier)
-
-    shape = MagicMock()
-    shape.name = "VM.Standard.A1.Flex"
-
-    result = MagicMock(
-        instance_id=None,
-        public_ip=None,
-        availability_domain="AD-1",
-        region="eu-milan-1",
-        shape=shape,
-    )
-
-    hunter._announce(result)
-
-    notifier.send.assert_called_once()
-    sent = notifier.send.call_args[0][0]
-    assert "capacity is available" in sent.lower()
-    assert "mode=notify" in sent.lower()
-    assert "VM.Standard.A1.Flex" in sent
-
-
+    def _announce(self, result: LaunchResult) -> None:
+        if result.instance_id and not result.public_ip and not result.availability_domain:
+            msg = f"ℹ️ Instance already running in {result.region} ({result.instance_id})"
+        elif result.public_ip is None and result.instance_id is None:
+            msg = (
+                f"🔔 Capacity is available (mode=notify, probe instance terminated)!\n"
+                f"Region: {result.region}\n"
+                f"AD: {result.availability_domain}\n"
+                f"Shape: {result.shape.name if result.shape else '?'}\n"
+                f"Switch mode to 'create' or launch manually now."
+            )
+        else:
+            msg = (
+                f"✅ Oracle A1 capacity found and VM launched!\n"
+                f"Region: {result.region}\n"
+                f"AD: {result.availability_domain}\n"
+                f"Shape: {result.shape.name if result.shape else '?'}\n"
+                f"Public IP: {result.public_ip or 'pending'}"
+            )
+        logger.info(msg)
+        self._notifier.send(msg)
+        

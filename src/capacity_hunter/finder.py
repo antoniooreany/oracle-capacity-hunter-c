@@ -4,11 +4,12 @@ from __future__ import annotations
 import base64
 import logging
 import random
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, cast
 
-from capacity_hunter.oci_shim import oci  # TODO: not resolved
+import oci
 
 from capacity_hunter.config import HunterConfig, ShapeConfig
 from capacity_hunter.notifier import TelegramNotifier
@@ -17,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 # OCI reports capacity exhaustion via a 500 ServiceError with this code.
 OUT_OF_CAPACITY_CODES = {"OutOfCapacity", "LimitExceeded", "InternalError"}
+
+# Statuses treated as recoverable even if the SDK's own retry_strategy already
+# gave up (DEFAULT_RETRY_STRATEGY caps at 8 attempts / 10 min - under sustained
+# throttling it can still surface here as an exception rather than resolving).
+RECOVERABLE_STATUSES = {429, 500}
 
 
 @dataclass
@@ -41,16 +47,49 @@ class CapacityHunter:
         )
 
     def _clients_for_region(self, region: str) -> tuple[oci.core.ComputeClient, oci.identity.IdentityClient]:
-        cfg = dict(self._base_oci_config)
+        cfg = dict[str, Any](self._base_oci_config)
         cfg["region"] = region
-        return oci.core.ComputeClient(cfg), oci.identity.IdentityClient(cfg)
+        # DEFAULT_RETRY_STRATEGY auto-retries on 429 (TooManyRequests) and 5xx
+        # with exponential backoff + jitter - without this, a 429 is an
+        # *unexpected* ServiceError that crashes the whole run.
+        retry_strategy = oci.retry.DEFAULT_RETRY_STRATEGY
+        return (
+            oci.core.ComputeClient(cfg, retry_strategy=retry_strategy),
+            oci.identity.IdentityClient(cfg, retry_strategy=retry_strategy),
+        )
 
     def _availability_domains(self, identity_client: oci.identity.IdentityClient) -> list[str]:
-        response = identity_client.list_availability_domains(self._config.compartment_id)
+        try:
+            response = identity_client.list_availability_domains(self._config.compartment_id)
+        except oci.exceptions.ServiceError as exc:
+            logger.warning(
+                "Could not list availability domains (status=%s code=%s): %s - skipping this region.",
+                exc.status, exc.code, exc.message,
+            )
+            return []
         return [ad.name for ad in response.data]
 
-    def _already_running(self, compute_client):
-        return None  # TODO: implement
+    def _already_running(self, compute_client: oci.core.ComputeClient) -> str | None:
+        try:
+            response = compute_client.list_instances(
+                compartment_id=self._config.compartment_id,
+                display_name=self._config.instance.display_name,
+                lifecycle_state="RUNNING",
+            )
+        except oci.exceptions.ServiceError as exc:
+            logger.warning(
+                "Could not check for an already-running instance (status=%s code=%s): %s",
+                exc.status, exc.code, exc.message,
+            )
+            return None
+        if response.data:
+            return cast(str, response.data[0].id)
+        return None
+
+    def _metadata(self) -> dict[str, str]:
+        with open(self._config.instance.ssh_public_key_path, encoding="utf-8") as fh:
+            ssh_key = fh.read().strip()
+        meta = {"ssh_authorized_keys": ssh_key}
         if self._config.instance.user_data_path:
             with open(self._config.instance.user_data_path, "rb") as fh:
                 meta["user_data"] = base64.b64encode(fh.read()).decode("ascii")
@@ -84,8 +123,13 @@ class CapacityHunter:
         try:
             launch_response = compute_client.launch_instance(details)
         except oci.exceptions.ServiceError as exc:
-            if exc.code in OUT_OF_CAPACITY_CODES or exc.status in {500, 429}:
-                logger.info("No capacity in %s / %s: %s", region, ad, exc.code)
+            if exc.code in OUT_OF_CAPACITY_CODES or exc.status in RECOVERABLE_STATUSES:
+                logger.info(
+                    "No capacity in %s / %s (status=%s code=%s)", region, ad, exc.status, exc.code
+                )
+                if exc.status == 429:
+                    logger.warning("Still throttled (429) after SDK retries exhausted - pausing 15s.")
+                    time.sleep(15)
                 return LaunchResult(found=False)
             raise  # unexpected error - surface it
 
@@ -115,7 +159,10 @@ class CapacityHunter:
         ).data
         public_ip = None
         if vnic_attachments:
-            vnic_client = oci.core.VirtualNetworkClient(dict(self._base_oci_config, region=region))
+            vnic_client = oci.core.VirtualNetworkClient(
+                dict[str, str](self._base_oci_config, region=region),
+                retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY,
+            )
             vnic = vnic_client.get_vnic(vnic_attachments[0].vnic_id).data
             public_ip = vnic.public_ip
 
@@ -146,19 +193,27 @@ class CapacityHunter:
                         return result
         return LaunchResult(found=False)
 
-    def run_forever(self) -> LaunchResult:
-        """Loop with exponential backoff until capacity is found."""
+    def run_forever(self, stop_event: threading.Event | None = None) -> LaunchResult:
+        """Loop with exponential backoff until capacity is found or stop_event is set."""
         sleep_time = self._config.min_interval_seconds
-        while True:
+        while not (stop_event and stop_event.is_set()):
             result = self.run_once()
             if result.found:
                 self._announce(result)
                 return result
 
             logger.info("No capacity anywhere this round. Sleeping %ss", sleep_time)
-            time.sleep(sleep_time)
+            waited = 0
+            while waited < sleep_time:
+                if stop_event and stop_event.is_set():
+                    break
+                time.sleep(min(1, sleep_time - waited))
+                waited += 1
             sleep_time = min(sleep_time * 2, self._config.max_interval_seconds)
             sleep_time += random.randint(0, 10)
+
+        logger.info("Stopped by request before capacity was found.")
+        return LaunchResult(found=False)
 
     def _announce(self, result: LaunchResult) -> None:
         if result.instance_id and not result.public_ip and not result.availability_domain:
@@ -181,10 +236,3 @@ class CapacityHunter:
             )
         logger.info(msg)
         self._notifier.send(msg)
-
-
-
-
-
-
-
