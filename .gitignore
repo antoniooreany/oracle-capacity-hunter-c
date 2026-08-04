@@ -13,3 +13,5 @@ config.yaml
 .env
 config-milan-*.yaml
 uv.lock
+.plan/
+.plan/
