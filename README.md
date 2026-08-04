@@ -160,8 +160,16 @@ MIT — see `LICENSE`.
 After a successful launch, the tool can resolve VNIC IPs, update a local .env file, and send a Telegram message with a ready-to-run SSH command.
 ## Running the UI
 
-Create and activate a virtual environment, install dependencies, then run:
+Install the project in editable mode, then run the UI with:
+
+```bash
+pip install -e .
+capacity-hunter-ui
+```
+
+Alternative direct launch:
 
 ```bash
 streamlit run src/capacity_hunter/ui/streamlit_app.py
 ```
+
