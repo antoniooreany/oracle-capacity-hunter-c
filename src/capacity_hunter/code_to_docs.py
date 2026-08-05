@@ -4,9 +4,6 @@ import argparse
 import json
 import os
 import sys
-from dataclasses import dataclass
-from typing import Iterable, TypedDict
-
 import urllib.error
 import urllib.request
 from collections.abc import Iterable
