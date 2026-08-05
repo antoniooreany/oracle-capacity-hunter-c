@@ -1,1 +1,1 @@
-<updated pyproject.toml content with [project.scripts] and cleaned dev optional-dependencies>
+<updated pyproject.toml content with [project.scripts] including capacity-hunter-ui>
