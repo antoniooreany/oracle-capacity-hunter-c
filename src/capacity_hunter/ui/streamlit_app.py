@@ -76,6 +76,9 @@ def main() -> None:
                 notifier = TelegramNotifier(config.telegram) if config.telegram else None
                 hunter = CapacityHunter(config, notifier=notifier)
                 result = hunter.run_forever() if run_forever else hunter.run_once()
+            except Exception as exc:  # noqa: BLE001 - intentional catch-all to surface any hunter failure in the UI  # noqa: BLE001 - intentional catch-all to surface any hunter failure in the UI
+                st.error(f"Search failed: {exc}")
+                st.stop()
             finally:
                 finder_logger.removeHandler(handler)
 
@@ -109,4 +112,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
 
