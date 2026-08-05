@@ -9,6 +9,9 @@ from typing import Iterable, TypedDict
 
 import urllib.error
 import urllib.request
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import TypedDict
 
 
 class Payload(TypedDict):
@@ -179,4 +182,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-    
