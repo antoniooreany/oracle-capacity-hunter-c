@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import Any, TypedDict, cast
 
 
 class Payload(TypedDict):
@@ -22,7 +22,7 @@ class ChangedFile:
     filename: str
 
 
-def _github_request(url: str, token: str) -> dict:
+def _github_request(url: str, token: str) -> dict[str, Any]:
     """Perform a GitHub API GET request and return JSON."""
     if not token:
         raise SystemExit("GITHUB_TOKEN or GH_TOKEN must be set in environment.")
@@ -41,7 +41,7 @@ def _github_request(url: str, token: str) -> dict:
         raise SystemExit(f"GitHub API connection error for {url}: {exc.reason}") from exc
 
     try:
-        return json.loads(data)
+        return cast(dict[str, Any], json.loads(data))
     except json.JSONDecodeError as exc:  # pragma: no cover
         raise SystemExit(f"GitHub API returned invalid JSON for {url}: {exc}") from exc
 
@@ -179,3 +179,7 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
