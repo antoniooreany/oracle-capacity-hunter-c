@@ -1,6 +1,10 @@
 param(
     [string]$BaseBranch = "develop",
-    [string]$Title = "feat(ui): Streamlit UI over CapacityHunter"
+    [string]$Title = "feat(ui): Streamlit UI over CapacityHunter",
+    [string]$Risks = "- Low: see commit history for scope of change.",
+    [string]$Config = "- No new required environment variables beyond existing ones.",
+    [string]$Testing = "- ruff check, pytest, manual smoke test.",
+    [string]$Notes = "-"
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,27 +19,33 @@ if ($CurrentBranch -eq $BaseBranch) {
 
 Write-Host "Using branch '$CurrentBranch' against base '$BaseBranch'..." -ForegroundColor Cyan
 
-# 2. Ищем открытый PR для этой ветки
+# 2. Ищем ВСЕ открытые PR для этой ветки (не полагаемся на --limit 1)
 try {
-    $ExistingPrJson = gh pr list `
+    $ExistingPrsJson = gh pr list `
         --base $BaseBranch `
         --head $CurrentBranch `
         --state open `
-        --json number `
-        --limit 1
+        --json number,title,url
 } catch {
     Write-Host "gh pr list failed: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
-$ExistingPr = $null
-if ($ExistingPrJson) {
-    $ExistingPr = $ExistingPrJson | ConvertFrom-Json
+$ExistingPrs = @()
+if ($ExistingPrsJson) {
+    $ExistingPrs = $ExistingPrsJson | ConvertFrom-Json
+}
+
+if ($ExistingPrs.Count -gt 1) {
+    Write-Host "Found $($ExistingPrs.Count) open PRs for branch '$CurrentBranch' - refusing to guess which to update:" -ForegroundColor Red
+    $ExistingPrs | ForEach-Object { Write-Host "  #$($_.number): $($_.title) -> $($_.url)" }
+    Write-Host "Close/merge the duplicates manually, then re-run this script." -ForegroundColor Red
+    exit 1
 }
 
 # 3. Коммиты и изменённые файлы
 $CommitsRange = "$BaseBranch..$CurrentBranch"
-$CommitsList = git log --oneline $CommitsRange
+$CommitsList = git log --oneline $CommitsRange | Out-String
 $ChangedFiles = git diff --name-only "$BaseBranch...$CurrentBranch"
 
 if (-not $ChangedFiles) {
@@ -44,6 +54,7 @@ if (-not $ChangedFiles) {
 }
 
 $ChangesLines = $ChangedFiles | ForEach-Object { "- $_" } | Out-String
+$Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss K"
 
 # 4. Стандартный Markdown-body
 $Body = @"
@@ -57,31 +68,35 @@ $ChangesLines
 ## Commits
 
 $CommitsList
-
 ## Risks
 
-$RisksLines
+$Risks
+
 ## Config
 
-$ConfigLines
+$Config
+
 ## Testing
 
-$TestingLines
+$Testing
+
 ## Notes
 
-$NotesLines
+$Notes
 
 _Last updated by scripts/pr.ps1 at $Timestamp._
 "@
 
 # 5. Если PR уже есть — обновляем, иначе создаём
-if ($ExistingPr -and $ExistingPr.number) {
-    $PrNumber = $ExistingPr.number
+if ($ExistingPrs.Count -eq 1) {
+    $PrNumber = $ExistingPrs[0].number
     Write-Host "Open PR #$PrNumber found for branch '$CurrentBranch'. Updating it..." -ForegroundColor Green
 
     gh pr edit $PrNumber `
         --title $Title `
         --body $Body
+
+    Write-Host "Updated: $($ExistingPrs[0].url)" -ForegroundColor Green
 } else {
     Write-Host "No open PR found for branch '$CurrentBranch'. Creating a new one..." -ForegroundColor Cyan
 
