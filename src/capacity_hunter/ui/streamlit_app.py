@@ -9,6 +9,21 @@ from capacity_hunter.finder import CapacityHunter
 from capacity_hunter.notifier import TelegramNotifier, format_capacity_summary
 
 
+class StreamlitLogHandler(logging.Handler):
+    """Log handler that writes finder logs into a Streamlit placeholder."""
+
+    def __init__(self, placeholder: st.delta_generator.DeltaGenerator) -> None:  # type: ignore[name-defined]
+        super().__init__()
+        self.placeholder = placeholder
+
+    def emit(self, record: logging.LogRecord) -> None:
+        msg = self.format(record)
+        # Append to existing text; simplest is to overwrite with new content.
+        existing = self.placeholder.text if hasattr(self.placeholder, "text") else ""
+        new_text = f"{existing}\n{msg}" if existing else msg
+        self.placeholder.text(new_text)
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Oracle Capacity Hunter",
@@ -50,12 +65,12 @@ def main() -> None:
             "Run continuously (run_forever)", value=False
         )
 
+        log_placeholder = st.empty()
+
         if st.button("Run hunter", type="primary"):
             with st.spinner("Running capacity hunter..."):
-                # Configure notifier if needed; here TelegramNotifier is an example
                 notifier = TelegramNotifier(config=config)
 
-<<<<<<< HEAD
                 hunter = CapacityHunter(
                     config=config,
                     notifier=notifier,
@@ -63,60 +78,30 @@ def main() -> None:
                     shape=shape,
                     max_price=max_price,
                     run_forever=run_forever,
-=======
-            handler = StreamlitLogHandler(log_placeholder)
-            finder_logger = logging.getLogger("capacity_hunter.finder")
-            finder_logger.addHandler(handler)
-            finder_logger.setLevel(logging.INFO)
-
-            try:
-                notifier = TelegramNotifier(config.telegram) if config.telegram else None
-                hunter = CapacityHunter(config, notifier=notifier)
-                result = hunter.run_forever() if run_forever else hunter.run_once()
-            except Exception as exc:
-                st.error(f"Search failed: {exc}")
-                st.stop()
-            finally:
-                finder_logger.removeHandler(handler)
-
-            if result.found:
-                st.success("Capacity found!")
-                st.write(
-                    {
-                        "region": result.region,
-                        "availability_domain": result.availability_domain,
-                        "shape": result.shape.name if result.shape else None,
-                        "public_ip": result.public_ip,
-                        "instance_id": result.instance_id,
-                    }
->>>>>>> 1932285 (fix(ui): catch unhandled exceptions in run_once/run_forever, show via st.error)
                 )
 
-                # Capture finder logs into Streamlit text area
                 finder_logger = logging.getLogger("capacity_hunter.finder")
-                log_messages: list[str] = []
-
-                class StreamlitHandler(logging.Handler):
-                    def emit(self, record: logging.LogRecord) -> None:
-                        log_messages.append(self.format(record))
-
-                handler = StreamlitHandler()
+                handler = StreamlitLogHandler(log_placeholder)
                 handler.setLevel(logging.INFO)
                 handler.setFormatter(logging.Formatter("%(message)s"))
                 finder_logger.addHandler(handler)
+                finder_logger.setLevel(logging.INFO)
 
                 try:
-                    result = hunter.run_once()
+                    result = (
+                        hunter.run_forever()
+                        if run_forever
+                        else hunter.run_once()
+                    )
+                except Exception as exc:  # noqa: BLE001 - intentional catch-all to surface any hunter failure in the UI
+                    st.error(f"Search failed: {exc}")
+                    st.stop()
                 finally:
                     finder_logger.removeHandler(handler)
 
             summary = format_capacity_summary(result)
             st.success("Capacity search completed.")
             st.markdown(summary)
-
-            if log_messages:
-                st.subheader("Finder logs")
-                st.text("\n".join(log_messages))
 
     with col_right:
         st.subheader("Current config snapshot")
@@ -128,9 +113,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-<<<<<<< HEAD
-    
-=======
-
-
->>>>>>> 1932285 (fix(ui): catch unhandled exceptions in run_once/run_forever, show via st.error)
