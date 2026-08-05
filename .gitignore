@@ -16,3 +16,5 @@ config-milan-*.yaml
 uv.lock
 .plan/
 .plan/
+
+config.yaml

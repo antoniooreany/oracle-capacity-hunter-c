@@ -55,6 +55,7 @@ def main() -> None:
                 # Configure notifier if needed; here TelegramNotifier is an example
                 notifier = TelegramNotifier(config=config)
 
+<<<<<<< HEAD
                 hunter = CapacityHunter(
                     config=config,
                     notifier=notifier,
@@ -62,6 +63,33 @@ def main() -> None:
                     shape=shape,
                     max_price=max_price,
                     run_forever=run_forever,
+=======
+            handler = StreamlitLogHandler(log_placeholder)
+            finder_logger = logging.getLogger("capacity_hunter.finder")
+            finder_logger.addHandler(handler)
+            finder_logger.setLevel(logging.INFO)
+
+            try:
+                notifier = TelegramNotifier(config.telegram) if config.telegram else None
+                hunter = CapacityHunter(config, notifier=notifier)
+                result = hunter.run_forever() if run_forever else hunter.run_once()
+            except Exception as exc:
+                st.error(f"Search failed: {exc}")
+                st.stop()
+            finally:
+                finder_logger.removeHandler(handler)
+
+            if result.found:
+                st.success("Capacity found!")
+                st.write(
+                    {
+                        "region": result.region,
+                        "availability_domain": result.availability_domain,
+                        "shape": result.shape.name if result.shape else None,
+                        "public_ip": result.public_ip,
+                        "instance_id": result.instance_id,
+                    }
+>>>>>>> 1932285 (fix(ui): catch unhandled exceptions in run_once/run_forever, show via st.error)
                 )
 
                 # Capture finder logs into Streamlit text area
@@ -100,4 +128,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+<<<<<<< HEAD
     
+=======
+
+
+>>>>>>> 1932285 (fix(ui): catch unhandled exceptions in run_once/run_forever, show via st.error)
