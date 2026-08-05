@@ -34,7 +34,7 @@ if ($ExistingPrJson) {
 }
 
 # 2. Коммиты и изменённые файлы
-$SummaryLines = "Introduce changes from branch `$CurrentBranch` into `$BaseBranch`."
+$SummaryLines = "Introduce changes from branch $CurrentBranch into $BaseBranch."
 $CommitsRange = "$BaseBranch..$CurrentBranch"
 $CommitsList = git log --oneline $CommitsRange
 $ChangedFiles = git diff --name-only "$BaseBranch...$CurrentBranch"
