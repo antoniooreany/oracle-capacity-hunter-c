@@ -98,11 +98,10 @@ if ($ExistingPr -and $ExistingPr.number) {
         --body $Body
 } else {
     Write-Host "No open PR found for branch '$CurrentBranch'. Creating a new one..." -ForegroundColor Cyan
-}
 
-gh pr create `
-  --base $BaseBranch `
-  --head $CurrentBranch `
-  --title $Title `
-  --body $Body
-  
+    gh pr create `
+      --base $BaseBranch `
+      --head $CurrentBranch `
+      --title $Title `
+      --body $Body
+}
