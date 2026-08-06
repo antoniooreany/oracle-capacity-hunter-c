@@ -29,6 +29,14 @@ class LaunchResult:
     instance_id: str | None = None
 
 
+def console_url_for(region: str, compartment_id: str) -> str:
+    """Build a Console URL to the Compute Instances page for a given region + compartment."""
+    return (
+        "https://cloud.oracle.com/compute/instances"
+        f"?region={region}&compartmentId={compartment_id}"
+    )
+
+
 class CapacityHunter:
     """Iterates (region, AD, shape) combinations looking for free capacity."""
 
@@ -42,7 +50,8 @@ class CapacityHunter:
 
     def _clients_for_region(self, region: str) -> tuple[oci.core.ComputeClient, oci.identity.IdentityClient]:
         cfg = dict(self._base_oci_config)
-        cfg["region"] = region
+        cfg["region"] = region # TODO: this is a hack to get around the limit of 100 items per request
+
         return oci.core.ComputeClient(cfg), oci.identity.IdentityClient(cfg)
 
     def _availability_domains(self, identity_client: oci.identity.IdentityClient) -> list[str]:
@@ -93,13 +102,31 @@ class CapacityHunter:
             ),
             metadata=self._metadata(),
         )
+
+        min_ram_size = 2  # in GB # TODO !
+
         try:
             launch_response = compute_client.launch_instance(details)
         except oci.exceptions.ServiceError as exc:
-            if exc.code in OUT_OF_CAPACITY_CODES or exc.status in {500, 429}:
-                logger.info("No capacity in %s / %s: %s", region, ad, exc.code)
+            if exc.code in OUT_OF_CAPACITY_CODES or exc.status in {500, 429}: # TODO extract this into a constant
+                if shape.memory_in_gbs >= min_ram_size: 
+                    cpu_info = f"{shape.ocpus} OCPUs"
+                    ram_info = f"{shape.memory_in_gbs} GB RAM"
+                    url = console_url_for(region, self._config.compartment_id)
+                    logger.info(
+                    "url=%s;cpu=%s;ram=%s;shape=%s;region=%s;code=%s;status=%s",
+                    url,
+                    cpu_info,
+                    ram_info,
+                    shape.name,
+                    region,
+                    exc.code,
+                    exc.status,
+    )
                 return LaunchResult(found=False)
-            raise  # unexpected error - surface it
+            # Unexpected error – propagate up.
+            raise
+
 
         instance = launch_response.data
 
@@ -123,7 +150,8 @@ class CapacityHunter:
             max_wait_seconds=180,
         )
         vnic_attachments = compute_client.list_vnic_attachments(
-            compartment_id=self._config.compartment_id, instance_id=instance.id
+            compartment_id=self._config.compartment_id,
+            instance_id=instance.id,
         ).data
         public_ip = None
         if vnic_attachments:
@@ -152,7 +180,16 @@ class CapacityHunter:
 
             for ad in self._availability_domains(identity_client):
                 for shape in self._config.shapes:
-                    logger.info("Trying region=%s ad=%s shape=%s", region, ad, shape.name)
+                    console_url = console_url_for(region, self._config.compartment_id)
+                    logger.info(
+                        "Trying region=%s ad=%s shape=%s (%s OCPUs, %s GB RAM). Console: %s",
+                        region,
+                        ad,
+                        shape.name,
+                        shape.ocpus,
+                        shape.memory_in_gbs,
+                        console_url,
+                    )
                     result = self._try_launch(compute_client, region, ad, shape)
                     if result.found:
                         return result
@@ -167,7 +204,13 @@ class CapacityHunter:
                 self._announce(result)
                 return result
 
-            logger.info("No capacity anywhere this round. Sleeping %ss", sleep_time)
+            first_region = self._config.regions[0] if self._config.regions else "unknown"
+            console_url = console_url_for(first_region, self._config.compartment_id)
+            logger.info(
+                "No capacity anywhere this round. Sleeping %ss. Console (first region): %s",
+                sleep_time,
+                console_url,
+            )
             time.sleep(sleep_time)
             sleep_time = min(sleep_time * 2, self._config.max_interval_seconds)
             sleep_time += random.randint(0, 10)
@@ -176,25 +219,28 @@ class CapacityHunter:
         if result.instance_id and not result.public_ip and not result.availability_domain:
             msg = f"ℹ️ Instance already running in {result.region} ({result.instance_id})"
         elif result.public_ip is None and result.instance_id is None:
+            console_url = console_url_for(result.region or "?", self._config.compartment_id)
             msg = (
-                f"🔔 Capacity is available (mode=notify, probe instance terminated)!\n"
+                "🔔 Capacity is available (mode=notify, probe instance terminated)!\n"
                 f"Region: {result.region}\n"
                 f"AD: {result.availability_domain}\n"
-                f"Shape: {result.shape.name if result.shape else '?'}\n"
-                f"Switch mode to 'create' or launch manually now."
+                f"Shape: {result.shape.name if result.shape else '?'} "
+                f"({result.shape.ocpus if result.shape else '?'} OCPUs, "
+                f"{result.shape.memory_in_gbs if result.shape else '?'} GB RAM)\n"
+                f"Console: {console_url}\n"
+                "Switch mode to 'create' or launch manually now."
             )
         else:
+            console_url = console_url_for(result.region or "?", self._config.compartment_id)
             msg = (
-                f"✅ Oracle A1 capacity found and VM launched!\n"
+                "✅ Oracle A1 capacity found and VM launched!\n"
                 f"Region: {result.region}\n"
                 f"AD: {result.availability_domain}\n"
-                f"Shape: {result.shape.name if result.shape else '?'}\n"
-                f"Public IP: {result.public_ip or 'pending'}"
+                f"Shape: {result.shape.name if result.shape else '?'} "
+                f"({result.shape.ocpus if result.shape else '?'} OCPUs, "
+                f"{result.shape.memory_in_gbs if result.shape else '?'} GB RAM)\n"
+                f"Public IP: {result.public_ip or 'pending'}\n"
+                f"Console: {console_url}"
             )
         logger.info(msg)
         self._notifier.send(msg)
-
-
-
-
-
