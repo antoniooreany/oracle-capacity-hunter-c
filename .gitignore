@@ -23,3 +23,7 @@ capacity.log
 copilot-todo.txt
 notion-pages.txt
 open-urls-yandex.ps1
+~$*.docx
+~$*.doc
+~$*
+
