@@ -1,10 +1,16 @@
-[project]
-name = "oci-vm-capacity-hunter"
-version = "0.1.0"
-description = "CLI and UI for hunting OCI A1/Flex VM capacity"
-requires-python = ">=3.11"
-# и остальные поля [project] здесь без изменений
+param(
+    [string]$BaseBranch = "develop",
+    [string]$Model = $null
+)
 
-[project.scripts]
-oci-hunter = "capacity_hunter.cli:main"
-capacity-hunter-ui = "capacity_hunter.ui.launcher:main"
+$ErrorActionPreference = "Stop"
+
+# Build arguments for pr.exe
+$argsList = @("--base", $BaseBranch)
+if ($Model) {
+    $argsList += @("--model", $Model)
+}
+
+# Delegate to the smart Python-based pr-sync tool (installed as pr.exe)
+pr.exe $argsList
+

@@ -1,0 +1,28 @@
+oci:
+  user: "your_user"
+  fingerprint: "..."
+  tenancy: "..."
+  region: "eu-frankfurt-1"
+
+instance:
+  compartment_id: "ocid1.compartment.oc1..example"
+  availability_domain: "Uocm:EU-FRANKFURT-1-AD-1"
+  subnet_id: "ocid1.subnet.oc1..example"
+  image_id: "ocid1.image.oc1..example"
+  shape: "VM.Standard.E4.Flex"
+  boot_volume_size_gb: 50
+
+hunter:
+  regions:
+    - "eu-frankfurt-1"
+    - "eu-amsterdam-1"
+  shapes:
+    - "VM.Standard.E4.Flex"
+    - "VM.Standard.E3.Flex"
+  max_price: 0.5
+
+notifications:
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: 0
